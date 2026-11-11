@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="si">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#10243a">
+<title>Taxi Meter GPS</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+:root{--navy:#10243a;--blue:#1769aa;--green:#159b62;--red:#d94343;--bg:#f2f5f8;--text:#172536}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);font-family:system-ui,-apple-system,"Noto Sans Sinhala",sans-serif;color:var(--text)}
+header{background:var(--navy);color:white;padding:17px 16px;text-align:center}
+header h1{font-size:21px;margin:0 0 4px} header p{font-size:12px;margin:0;color:#d7e3ef}
+main{max-width:760px;margin:auto;padding:12px}
+.card{background:white;border-radius:15px;padding:15px;margin-bottom:12px;box-shadow:0 3px 14px #14283b10}
+.mapwrap{position:relative}
+#map{height:300px;border-radius:12px;z-index:1;background:#dce5e9}
+.mapnote{font-size:11px;color:#617184;margin-top:7px}
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.stat{background:#f4f7fa;border-radius:12px;padding:13px}
+.label{font-size:12px;color:#64748b}.value{font-size:25px;font-weight:750;margin-top:3px}.unit{font-size:12px;font-weight:500;color:#64748b}
+.fare{background:#eaf7f0;border:1px solid #c8ead8}.fare .value{color:#087c49;font-size:30px}
+.buttons{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+button{border:0;border-radius:12px;padding:15px 10px;color:white;font-size:15px;font-weight:750;cursor:pointer}
+button:disabled{opacity:.45;cursor:not-allowed}
+#start{background:var(--green)}#stop{background:var(--red)}#locate{background:var(--blue);width:100%;margin-top:10px}
+.secondary{background:#e8eef4;color:#203449;width:100%;margin-top:9px}
+.status{font-size:13px;padding:10px 12px;background:#eef4fa;border-radius:10px;margin-bottom:12px}
+.settings{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+label{font-size:12px;color:#5b6b7d;display:block;margin-bottom:5px}
+input{width:100%;padding:11px;border:1px solid #ccd6e0;border-radius:9px;font-size:16px}
+.small{font-size:11px;color:#64748b;line-height:1.55}
+.tripline{display:flex;justify-content:space-between;font-size:13px;padding:7px 0;border-bottom:1px solid #edf1f4}
+footer{text-align:center;color:#718096;font-size:11px;padding:8px 12px 25px}
+@media(max-width:390px){#map{height:260px}.value{font-size:22px}}
+</style>
+</head>
+<body>
+<header><h1>🚕 GPS Taxi Meter</h1><p>සජීවී ස්ථානය • ගමන් දුර • ගාස්තුව</p></header>
+<main>
+  <section class="card mapwrap">
+    <div id="map"></div>
+    <div class="mapnote">සිතියම OpenStreetMap මගින් පෙන්වයි. අන්තර්ජාලය අවශ්‍යයි.</div>
+    <button id="locate">📍 මගේ වත්මන් ස්ථානය පෙන්වන්න</button>
+  </section>
+
+  <section class="card">
+    <div class="status" id="status">GPS සූදානම්. මුලින්ම Location අවසරය ලබාදෙන්න.</div>
+    <div class="stats">
+      <div class="stat"><div class="label">ගමන් කළ දුර</div><div class="value"><span id="distance">0.00</span> <span class="unit">km</span></div></div>
+      <div class="stat"><div class="label">ගමන් කාලය</div><div class="value" id="duration">00:00</div></div>
+      <div class="stat fare"><div class="label">ඇස්තමේන්තු ගාස්තුව</div><div class="value">Rs. <span id="fare">0</span></div></div>
+      <div class="stat"><div class="label">GPS නිරවද්‍යතාව</div><div class="value"><span id="accuracy">--</span> <span class="unit">m</span></div></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="buttons">
+      <button id="start">▶ START RIDE</button>
+      <button id="stop" disabled>■ STOP RIDE</button>
+    </div>
+    <button class="secondary" id="reset">නව ගමනක් සඳහා Reset</button>
+  </section>
+
+  <section class="card">
+    <h3 style="margin:0 0 12px;font-size:16px">ගාස්තු සැකසුම්</h3>
+    <div class="settings">
+      <div><label for="baseFare">පළමු දුර (km)</label><input id="baseKm" type="number" min="0" step="0.1" value="2"></div>
+      <div><label for="baseFare">පළමු දුරට ගාස්තුව (රු.)</label><input id="baseFare" type="number" min="0" step="1" value="250"></div>
+      <div><label for="extraRate">අමතර km එකකට (රු.)</label><input id="extraRate" type="number" min="0" step="1" value="70"></div>
+      <div><label for="rounding">අමතර දුර ගණනය</label><select id="rounding" style="width:100%;padding:11px;border:1px solid #ccd6e0;border-radius:9px;font-size:14px"><option value="exact">සැබෑ දුර අනුව</option><option value="ceil">ඊළඟ සම්පූර්ණ km එකට</option></select></div>
+    </div>
+    <p class="small">උදාහරණය: පළමු 2 km = රු.250, ඉන්පසු සෑම km එකකටම රු.70. අවශ්‍ය නම් මිල වෙනස් කරන්න.</p>
+  </section>
+
+  <section class="card">
+    <h3 style="margin:0 0 8px;font-size:16px">ගමනේ තත්ත්වය</h3>
+    <div class="tripline"><span>ගමන ආරම්භ කළ වේලාව</span><strong id="startTime">--</strong></div>
+    <div class="tripline"><span>අවසන් කළ වේලාව</span><strong id="endTime">--</strong></div>
+    <div class="tripline"><span>GPS ලැබුණු ස්ථාන</span><strong id="points">0</strong></div>
+  </section>
+  <p class="small">වැදගත්: GPS දුර මාර්ගයේ සැබෑ ධාවන දුරට ආසන්න ඇස්තමේන්තුවකි; GPS signal දුර්වල විට වෙනසක් ඇතිවිය හැක. Browser එක පසුබිමට දැමූ විට හෝ screen එක lock කළ විට GPS updates නතර විය හැක. ගමන අතරතුර Chrome විවෘතව තබා screen එක නොනිවී තබන්න.</p>
+</main>
+<footer>GPS Taxi Meter • ඔබගේ දුරකථනයේ browser එකෙන් ක්‍රියා කරයි</footer>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+(() => {
+ const $ = id => document.getElementById(id);
+ let map, marker, line, watchId=null, running=false, totalKm=0, lastPoint=null;
+ let startAt=null, endAt=null, timer=null, pointCount=0, wakeLock=null;
+ const path=[];
+ const status = msg => $('status').textContent=msg;
+ const fmtTime = d => d ? d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'}) : '--';
+ const haversine = (a,b) => {
+   const R=6371000, rad=x=>x*Math.PI/180;
+   const dLat=rad(b.lat-a.lat), dLon=rad(b.lng-a.lng);
+   const x=Math.sin(dLat/2)**2+Math.cos(rad(a.lat))*Math.cos(rad(b.lat))*Math.sin(dLon/2)**2;
+   return 2*R*Math.asin(Math.sqrt(x));
+ };
+ function fareFor(km){
+   const baseKm=Math.max(0,Number($('baseKm').value)||0);
+   const baseFare=Math.max(0,Number($('baseFare').value)||0);
+   const rate=Math.max(0,Number($('extraRate').value)||0);
+   let extra=Math.max(0,km-baseKm);
+   if($('rounding').value==='ceil') extra=Math.ceil(extra*100)/100; 
+   return Math.round((km<=baseKm ? (km>0?baseFare:0) : baseFare+extra*rate)*100)/100;
+ }
+ function update(){
+   $('distance').textContent=totalKm.toFixed(2);
+   $('fare').textContent=fareFor(totalKm).toLocaleString('en-US',{maximumFractionDigits:2});
+   $('points').textContent=pointCount;
+ }
+ function duration(){
+   if(!startAt)return;
+   const sec=Math.floor(((endAt||new Date())-startAt)/1000);
+   $('duration').textContent=String(Math.floor(sec/60)).padStart(2,'0')+':'+String(sec%60).padStart(2,'0');
+ }
+ function initMap(lat=7.957, lng=80.760){
+   map=L.map('map').setView([lat,lng],15);
+   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
+     maxZoom:19, attribution:'&copy; OpenStreetMap contributors'
+   }).addTo(map);
+   line=L.polyline([], {color:'#1769aa',weight:5}).addTo(map);
+ }
+ function onPosition(pos){
+   const p={lat:pos.coords.latitude,lng:pos.coords.longitude};
+   $('accuracy').textContent=Math.round(pos.coords.accuracy||0);
+   if(!map){initMap(p.lat,p.lng);}
+   if(!marker) marker=L.marker([p.lat,p.lng]).addTo(map).bindPopup('ඔබගේ ස්ථානය');
+   else marker.setLatLng([p.lat,p.lng]);
+   if(running){
+     // Avoid poor GPS readings and impossible jumps. First point establishes the starting position.
+     if(pos.coords.accuracy>60){status('GPS නිරවද්‍යතාව අඩුයි ('+Math.round(pos.coords.accuracy)+'m). හොඳ signal එකක් ලැබෙනතුරු රැඳී සිටින්න.');return;}
+     if(lastPoint){
+       const meters=haversine(lastPoint,p);
+       const elapsed=Math.max(1,(pos.timestamp-lastPoint.time)/1000);
+       const speed=meters/elapsed;
+       // Ignore tiny GPS jitter and implausible jumps (>160 km/h).
+       if(meters>=4 && speed<45){
+         totalKm+=meters/1000;
+         path.push([p.lat,p.lng]);
+         line.setLatLngs(path);
+         lastPoint={...p,time:pos.timestamp};
+         pointCount++;
+         update();
+       } else if(meters<4) {
+         // Keep the previous anchor so small GPS drift does not accumulate.
+       } else {
+         status('GPS ස්ථානයේ හදිසි වෙනසක් හඳුනාගත්තා. එම reading එක ගණනයට ගත්තේ නැහැ.');
+       }
+     } else {
+       lastPoint={...p,time:pos.timestamp};
+       path.push([p.lat,p.lng]); line.setLatLngs(path); pointCount++; update();
+     }
+     map.panTo([p.lat,p.lng],{animate:true,duration:0.4});
+     if(status) status('ගමන මැනෙමින් පවතී. GPS signal හොඳින් ලැබෙන බව තහවුරු කරන්න.');
+   } else {
+     map.panTo([p.lat,p.lng]);
+   }
+ }
+ function onError(err){
+   const msgs={1:'Location අවසරය ලබාදී නැහැ. Chrome Settings තුළ Location Allow කරන්න.',2:'GPS ස්ථානය ලබාගත නොහැක. Location/GPS ON කරන්න.',3:'GPS ප්‍රතිචාරය ප්‍රමාදයි. නැවත උත්සාහ කරන්න.'};
+   status(msgs[err.code]||'GPS දෝෂයක්. නැවත උත්සාහ කරන්න.');
+ }
+ function requestGPS(){
+   if(!navigator.geolocation){status('මෙම browser එක GPS සඳහා සහාය නොදක්වයි.');return;}
+   navigator.geolocation.getCurrentPosition(onPosition,onError,{enableHighAccuracy:true,timeout:20000,maximumAge:0});
+ }
+ $('locate').addEventListener('click',requestGPS);
+ $('start').addEventListener('click',async()=>{
+   if(!navigator.geolocation){status('මෙම browser එක GPS සඳහා සහාය නොදක්වයි.');return;}
+   if(!window.isSecureContext){status('GPS සඳහා HTTPS අවශ්‍යයි. GitHub Pages වෙතින් වෙබ් අඩවිය විවෘත කරන්න.');return;}
+   if(!navigator.geolocation){return;}
+   navigator.geolocation.getCurrentPosition(pos=>{
+     totalKm=0;lastPoint=null;path.length=0;pointCount=0;endAt=null;
+     startAt=new Date();$('startTime').textContent=fmtTime(startAt);$('endTime').textContent='--';
+     line.setLatLngs([]);running=true;
+     $('start').disabled=true;$('stop').disabled=false;
+     onPosition(pos);
+     watchId=navigator.geolocation.watchPosition(onPosition,onError,{enableHighAccuracy:true,maximumAge:1000,timeout:20000});
+     timer=setInterval(duration,1000);duration();update();
+     status('ගමන ආරම්භ වුණා. Customer Drop කළ පසු STOP RIDE ඔබන්න.');
+     if('wakeLock' in navigator){navigator.wakeLock.request('screen').then(w=>wakeLock=w).catch(()=>{});}
+   },onError,{enableHighAccuracy:true,timeout:20000,maximumAge:0});
+ });
+ $('stop').addEventListener('click',()=>{
+   if(!running)return;
+   running=false;endAt=new Date();
+   if(watchId!==null){navigator.geolocation.clearWatch(watchId);watchId=null;}
+   if(timer){clearInterval(timer);timer=null;}
+   $('start').disabled=false;$('stop').disabled=true;
+   $('endTime').textContent=fmtTime(endAt);duration();update();
+   if(wakeLock){wakeLock.release().catch(()=>{});wakeLock=null;}
+   status('ගමන අවසන්. දුර '+totalKm.toFixed(2)+' km | ගාස්තුව රු. '+fareFor(totalKm).toFixed(2));
+ });
+ $('reset').addEventListener('click',()=>{
+   if(running){status('Reset කිරීමට පෙර STOP RIDE ඔබන්න.');return;}
+   totalKm=0;lastPoint=null;startAt=null;endAt=null;pointCount=0;path.length=0;
+   $('distance').textContent='0.00';$('fare').textContent='0';$('duration').textContent='00:00';
+   $('startTime').textContent='--';$('endTime').textContent='--';$('points').textContent='0';
+   if(line)line.setLatLngs([]);
+   status('නව ගමනකට සූදානම්. START RIDE ඔබන්න.');
+ });
+ ['baseKm','baseFare','extraRate','rounding'].forEach(id=>$(id).addEventListener('input',update));
+ initMap();
+})();
+</script>
+</body>
+</html>
